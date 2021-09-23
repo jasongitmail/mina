@@ -8008,7 +8008,7 @@
           "description": null,
           "fields": [
             {
-              "name": "initial_mininum_balance",
+              "name": "initialMinimumBalance",
               "description": "The initial minimum balance for a time-locked account",
               "args": [],
               "type": {
@@ -8020,7 +8020,7 @@
               "deprecationReason": null
             },
             {
-              "name": "cliff_time",
+              "name": "cliffTime",
               "description": "The cliff time for a time-locked account",
               "args": [],
               "type": {
@@ -8032,7 +8032,7 @@
               "deprecationReason": null
             },
             {
-              "name": "cliff_amount",
+              "name": "cliffAmount",
               "description": "The cliff amount for a time-locked account",
               "args": [],
               "type": {
@@ -8044,7 +8044,7 @@
               "deprecationReason": null
             },
             {
-              "name": "vesting_period",
+              "name": "vestingPeriod",
               "description": "The vesting period for a time-locked account",
               "args": [],
               "type": {
@@ -8056,7 +8056,7 @@
               "deprecationReason": null
             },
             {
-              "name": "vesting_increment",
+              "name": "vestingIncrement",
               "description": "The vesting increment for a time-locked account",
               "args": [],
               "type": {
