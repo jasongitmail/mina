@@ -156,19 +156,19 @@ module Statement : sig
              , 'fee_excess
              , 'token_id
              , 'sok_digest )
-             t
+             t =
+          { source : 'ledger_hash
+          ; target : 'ledger_hash
+          ; supply_increase : 'amount
+          ; pending_coinbase_stack_state : 'pending_coinbase
+          ; fee_excess : 'fee_excess
+          ; next_available_token_before : 'token_id
+          ; next_available_token_after : 'token_id
+          ; sok_digest : 'sok_digest
+          }
+        [@@deriving compare, equal, hash, sexp, yojson]
 
-        (* =
-             { source: 'ledger_hash
-             ; target: 'ledger_hash
-             ; supply_increase: 'amount
-             ; pending_coinbase_stack_state: 'pending_coinbase
-             ; fee_excess: 'fee_excess
-             ; next_available_token_before: 'token_id
-             ; next_available_token_after: 'token_id
-             ; sok_digest: 'sok_digest }
-           [@@deriving compare, equal, hash, sexp, yojson]
-
+        (*
            val to_latest :
                 ('ledger_hash -> 'ledger_hash')
              -> ('amount -> 'amount')
@@ -189,9 +189,14 @@ module Statement : sig
                 , 'fee_excess'
                 , 'token_id'
                 , 'sok_digest' )
-                t *)
+                t
+            *)
       end
     end]
+
+    val to_latest :
+         ('a, 'b, 'c Pending_coinbase_stack_state.poly, 'd, 'e, 'f) Stable.V1.t
+      -> ('a, 'b, 'c, 'd, 'e, 'f, Mina_state.Local_state.t) Stable.V2.t
   end
 
   type ( 'ledger_hash
@@ -414,6 +419,16 @@ val generate_transaction_witness :
   -> unit
 
 module Parties_segment : sig
+  module Spec : sig
+    type single =
+      { predicate_type : [ `Full | `Nonce_or_accept ]
+      ; auth_type : Control.Tag.t
+      ; is_start : [ `Yes | `No | `Compute_in_circuit ]
+      }
+
+    type t = single list
+  end
+
   module Witness = Transaction_witness.Parties_segment_witness
 
   module Basic : sig
@@ -478,3 +493,17 @@ val constraint_system_digests :
      constraint_constants:Genesis_constants.Constraint_constants.t
   -> unit
   -> (string * Md5.t) list
+
+val dummy_constraints : unit -> (unit, 'a) Tick.Checked.t
+
+module Base : sig
+  module Parties_snark : sig
+    val main :
+         ?witness:Parties_segment.Witness.t
+      -> Parties_segment.Spec.t
+      -> constraint_constants:Genesis_constants.Constraint_constants.t
+      -> (int * Snapp_statement.Checked.t) list
+      -> Statement.With_sok.var
+      -> unit
+  end
+end
