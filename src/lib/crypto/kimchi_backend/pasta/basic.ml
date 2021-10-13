@@ -3,6 +3,7 @@ open Kimchi_backend_common
 
 (** ? *)
 module Rounds : sig
+  (* TODO: remove open *)
   open Pickles_types
 
   module Wrap : Nat.Add.Intf_transparent
@@ -67,6 +68,7 @@ end = struct
   end
 end
 
+(* why use a functor here? *)
 module Bigint256 =
   Kimchi_backend_common.Bigint.Make
     (Kimchi.Foundations.BigInt256)

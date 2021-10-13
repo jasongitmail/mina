@@ -5,6 +5,13 @@ open Unsigned.Size_t
 module Constants = struct
   (** number of witness *)
   let columns = 15
+
+  (* TODO: zk_rows is specified on the Rust side now, so I don't think we need this here for the permutation AT LEAST. This should be specified on the Rust side for other polynomials like the wires *)
+
+  (* TODO: is this 3 or 2? *)
+
+  (** number of rows used to add zero-knowledge to the witness polynomials *)
+  let zk_rows = 2
 end
 
 (** a gate interface, parameterized by a field *)
@@ -41,32 +48,39 @@ module Position = struct
   type 'row t = { row : 'row; col : int }
 
   (** generates a full row of positions that each points to itself *)
-  let default (row: 'row) : (_ t) array = Array.init Constants.columns (fun i -> { row; col=i })
+  let create_cols (row : 'row) : _ t array =
+    Array.init Constants.columns (fun i -> { row; col = i })
 end
 
-(** A specification for a gate type *)
+(** A gate *)
 module Gate_spec = struct
+  (** A gate/row/constraint consists of a type (kind), a row, the other cells its columns/cells are connected to (wired_to), and the selector polynomial associated with the gate *)
   type ('row, 'f) t =
-    { kind : Kimchi.Protocol.gate_type ;
-    row : 'row 
-    ; wired_to : ('row Position.t) array
+    { kind : Kimchi.Protocol.gate_type
+    ; row : 'row
+    ; wired_to : 'row Position.t array
     ; coeffs : 'f array
+          (* TODO: shouldn't the coeffs live in the gate type enum? *)
     }
 
-  let map_rows (t: (_, _) t) ~f : (_, _) t =
+  let map_rows (t : (_, _) t) ~f : (_, _) t =
     (* { wire with row = f row } *)
-    let wired_to = Array.map (fun (pos: _ Position.t) -> { pos with row = f pos.row }) t.wired_to in
+    let wired_to =
+      Array.map
+        (fun (pos : _ Position.t) -> { pos with row = f pos.row })
+        t.wired_to
+    in
     { t with row = f t.row; wired_to }
 end
 
-(** Represents the state of a hash function at some point *)
+(** Represents the state of a hash function *)
 module Hash_state = struct
   open Core_kernel
   module H = Digestif.SHA256
 
   type t = H.ctx
 
-  (* TODO: why `md5(SHA-256(x))`? *)
+  (* TODO: why `md5(SHA-256(x))` instead of truncating? *)
   let digest t = Md5.digest_string H.(to_raw_string (get t))
 
   (* TODO: it's weird to have a function that you don't know how to call here, this probably should be wrapped with a safer interface (I'm assuming it's the initial state) *)
@@ -99,7 +113,8 @@ module Plonk_constraint = struct
           Poseidon { state = Array.map ~f:(fun x -> Array.map ~f x) state }
       | EC_add { p1; p2; p3 } ->
           EC_add { p1 = fp p1; p2 = fp p2; p3 = fp p3 }
-      | EC_double -> EC_double 
+      | EC_double ->
+          EC_double
       | EC_scale { state } ->
           EC_scale
             { state = Array.map ~f:(fun x -> Scale_round.map ~f x) state }
@@ -178,24 +193,24 @@ module V = struct
 end
 
 type ('a, 'f) t =
-  { (** map of cells that share the same value (enforced by to the permutation) *)
-    equivalence_classes : (Row.t Position.t) list V.Table.t
-  ; (** How to compute each internal variable (as a linear combination of other variables) *)
+  { (* map of cells that share the same value (enforced by to the permutation) *)
+    equivalence_classes : Row.t Position.t list V.Table.t
+  ; (* How to compute each internal variable (as a linear combination of other variables) *)
     internal_vars : (('f * V.t) list * 'f option) Internal_var.Table.t
-  ; (** ?, in reversed order because functional programming *)
+  ; (* ?, in reversed order because functional programming *)
     mutable rows_rev : V.t option array list
-  ; (** a circuit is described by a series of gates. A gate is finalized if TKTK *)
+  ; (* a circuit is described by a series of gates. A gate is finalized if TKTK *)
     mutable gates :
       [ `Finalized | `Unfinalized_rev of (Row.t, 'f) Gate_spec.t list ]
-  ; (** an instruction pointer *)
+  ; (* an instruction pointer *)
     mutable next_row : int
-  ; (** hash of the circuit, for distinguishing different circuits *)
+  ; (* hash of the circuit, for distinguishing different circuits *)
     mutable hash : Hash_state.t
-  ; (** ? *)
+  ; (* ? *)
     mutable constraints : int
-  ; (** the size of the public input (which fills the first rows of our constraint system *)
+  ; (* the size of the public input (which fills the first rows of our constraint system *)
     public_input_size : int Core_kernel.Set_once.t
-  ; (** whatever is not public input *)
+  ; (* whatever is not public input *)
     mutable auxiliary_input_size : int
   }
 
@@ -204,17 +219,12 @@ module Hash = Core.Md5
 (* the hash of the circuit *)
 let digest (t : _ t) = Hash_state.digest t.hash
 
-(* TODO: zk_rows is specified on the Rust side now, so I don't think we need this here for the permutation AT LEAST. This should be specified on the Rust side for other polynomials like the wires *)
-
-(** The number of rows used *)
-(* TODO: is this 3 or 2? *)
-let zk_rows = 2
-
 (* TODO: shouldn't that Make create something bounded by a signature? As we know what a back end should be? Check where this is used *)
 
 (* TODO: glossary of terms in this file (terms, reducing, feeding) + module doc *)
 
 (* TODO: rename Fp to F or something *)
+
 (** ? *)
 module Make
     (Fp : Field.S)
@@ -284,7 +294,8 @@ struct
             let t = H.feed_string t "ec_add" in
             let pr (x, y) = cvars [ x; y ] in
             t |> pr p1 |> pr p2 |> pr p3
-        | EC_double -> failwith "not_implemented"
+        | EC_double ->
+            failwith "not_implemented"
         | EC_scale { state } ->
             let t = H.feed_string t "ec_scale" in
             Array.fold state ~init:t
@@ -307,7 +318,7 @@ struct
       Internal_var.Table.create ()
     in
     let public_input_size = Set_once.get_exn sys.public_input_size [%here] in
-    let num_rows = zk_rows + public_input_size + sys.next_row in
+    let num_rows = Constants.zk_rows + public_input_size + sys.next_row in
     let res = Array.init num_rows ~f:(fun _ -> Array.create ~len:3 Fp.zero) in
     for i = 0 to public_input_size - 1 do
       res.(i).(0) <- external_values (i + 1)
@@ -343,7 +354,7 @@ struct
                 let value = compute lc in
                 res.(i).(j) <- value ;
                 Hashtbl.set internal_values ~key:v ~data:value)) ;
-    for r = 0 to zk_rows - 1 do
+    for r = 0 to Constants.zk_rows - 1 do
       for c = 0 to 2 do
         res.(num_rows - 1 - r).(c) <- Fp.random ()
       done
@@ -395,7 +406,7 @@ struct
       A key is an external or internal variable.
       The row must be given relative to the start of the circuit 
       (so at the start of the public-input rows). *)
-  let wire' sys key row (col: int) =
+  let wire' sys key row (col : int) =
     let prev =
       match V.Table.find sys.equivalence_classes key with
       | Some x -> (
@@ -416,14 +427,17 @@ struct
   (** Same as wire', except that the row must be given relatively to the end of the public-input rows *)
   let wire sys key row col = wire' sys key (Row.After_public_input row) col
 
-  (** TKKT *)
+  (** Adds zero-knowledgeness to the gates/rows, and convert into Rust type [Gates.t].
+      This can only be called once *)
   let finalize_and_get_gates sys =
     match sys.gates with
     | `Finalized ->
         failwith "Already finalized"
     | `Unfinalized_rev gates ->
-        let g = Gates.create () in
-        let public_input_size = Set_once.get_exn sys.public_input_size [%here] in
+        let gates = Gates.create () in
+        let public_input_size =
+          Set_once.get_exn sys.public_input_size [%here]
+        in
         (* First, add gates for public input *)
         let pub_selectors = [| Fp.one; Fp.zero; Fp.zero; Fp.zero; Fp.zero |] in
         let pub_input_gate_specs_rev = ref [] in
@@ -431,52 +445,47 @@ struct
           let lp = wire' sys (V.External (row + 1)) (Row.Public_input row) 0 in
           let lp_row = Row.to_absolute ~public_input_size lp.row in
           let public_gate =
-            let lp = Position.{ row = lp_row ; col = lp.col } in
-            Array.append [| lp |] (Array.init 14 ~f:(fun i -> Position.{ row; col=i + 1 }))
+            let lp = Position.{ row = lp_row; col = lp.col } in
+            Array.append [| lp |]
+              (Array.init 14 ~f:(fun i -> Position.{ row; col = i + 1 }))
           in
-          (* Add to the gate vector *)
           pub_input_gate_specs_rev :=
-            { Gate_spec.kind = Generic ;
-            row = lp_row
+            { Gate_spec.kind = Generic
+            ; row = lp_row
             ; wired_to = public_gate
             ; coeffs = pub_selectors
             }
             :: !pub_input_gate_specs_rev
         done ;
-        let offset_row = Row.to_absolute ~public_input_size in
+        (* Add zero-knowledge rows/gates at the very end *)
         let all_gates =
           let rev_map_append xs tl ~f =
             List.fold xs ~init:tl ~f:(fun acc x -> f x :: acc)
           in
-          let offset = Gate_spec.map_rows ~f:offset_row in
+          let to_absolute_rows =
+            Gate_spec.map_rows ~f:(Row.to_absolute ~public_input_size)
+          in
           let random_rows =
-            let zeroes = Array.init 5 ~f:(fun _ -> Fp.zero) in
-            List.init zk_rows ~f:(fun i ->
-                let row = Row.After_public_input (public_input_size + sys.next_row + i) in
-                let wired_to = Position.default row in
-                offset
-                  { kind = Generic
-                  ; row
-                  ; wired_to
-                  ; coeffs = zeroes
-                  })
+            let coeffs = Array.init 5 ~f:(fun _ -> Fp.zero) in
+            List.init Constants.zk_rows ~f:(fun i ->
+                let row = Row.After_public_input (sys.next_row + i) in
+                let wired_to = Position.create_cols row in
+                to_absolute_rows { kind = Generic; row; wired_to; coeffs })
           in
           List.rev_append !pub_input_gate_specs_rev
-            (rev_map_append gates random_rows ~f:offset)
+            (rev_map_append gates random_rows ~f:to_absolute_rows)
         in
-        List.iter all_gates
-          ~f:(fun { kind; row; lrow; lcol; rrow; rcol; orow; ocol; coeffs } ->
-            Gates.add g
-              { kind
+        (* Convert all the gates into our Gates.t Rust vector type *)
+        List.iter all_gates ~f:(fun { kind; row; wired_to; coeffs } ->
+            Gates.add gates
+              { typ = kind
+              ; row
               ; wires =
-                  { row
-                  ; l = { row = lrow; col = lcol }
-                  ; r = { row = rrow; col = rcol }
-                  ; o = { row = orow; col = ocol }
-                  }
+                  wired_to (* maybe easier if we use an array in Rust here... *)
               ; c = coeffs
               }) ;
-        g
+        (* Return the zero-knowledgized gates *)
+        gates
 
   (** Calls [finalize_and_get_gates] and ignores the result. *)
   let finalize t = ignore (finalize_and_get_gates t : Gates.t)
@@ -520,7 +529,7 @@ struct
         Some (List.rev ((acc, i) :: ts), n + 1, has_constant_term)
 
   (** Adds a row/gate/constraint manually *)
-  let add_row sys rows kind (wired_to: _ wired_to array) coeffs =
+  let add_row sys rows kind (wired_to : _ wired_to array) coeffs =
     match sys.gates with
     | `Finalized ->
         failwith "add_row called on finalized constraint system"
@@ -528,11 +537,7 @@ struct
         let open Position in
         sys.gates <-
           `Unfinalized_rev
-            ( { kind
-              ; row = After_public_input sys.next_row
-              ; wired_to
-              ; coeffs
-              }
+            ( { kind; row = After_public_input sys.next_row; wired_to; coeffs }
             :: gates ) ;
         sys.next_row <- sys.next_row + 1 ;
         sys.rows_rev <- rows :: sys.rows_rev
@@ -839,9 +844,9 @@ struct
         add_generic_constraint ?l:(var l) ?r:(var r) ?o:(var o)
           [| coeff l; coeff r; coeff o; m; !c |]
           sys
-    (* | w0 | w1 | w2 | w3 | w4 | w5 
-state = [ x , x  , x ], [ y, y, y ], ... ]
-          i=0, perm^   i=1, perm^
+    (* | w0 | w1 | w2 | w3 | w4 | w5
+       state = [ x , x  , x ], [ y, y, y ], ... ]
+                 i=0, perm^   i=1, perm^
     *)
     | Plonk_constraint.T (Poseidon { state }) ->
         let reduce_state sys (s : Fp.t Snarky_backendless.Cvar.t array array) :
@@ -852,14 +857,13 @@ state = [ x , x  , x ], [ y, y, y ], ... ]
         let add_round_state array ind =
           let prev =
             (* same row, except for last 3
-            also order is different except for first 3 -.-
-            0,1,2 -> 0,1,2 (mapped to what `wire` says)
-            3, 4, 5 -> ... (mapped to itself)
-            6, 7, 8 -> ... (mapped to itself)
-            9, 10, 11 -> ... (mapped to itself)
-            14, 15, 16 -> 3, 4, 5 (mapped to next row 0, 1, 2) *)
-            Array.mapi array ~f:(fun i x ->
-                wire sys x sys.next_row i)
+               also order is different except for first 3 -.-
+               0,1,2 -> 0,1,2 (mapped to what `wire` says)
+               3, 4, 5 -> ... (mapped to itself)
+               6, 7, 8 -> ... (mapped to itself)
+               9, 10, 11 -> ... (mapped to itself)
+               14, 15, 16 -> 3, 4, 5 (mapped to next row 0, 1, 2) *)
+            Array.mapi array ~f:(fun i x -> wire sys x sys.next_row i)
           in
           add_row sys
             (Array.map array ~f:(fun x -> Some x))
@@ -868,7 +872,8 @@ state = [ x , x  , x ], [ y, y, y ], ... ]
         in
         Array.iteri
           ~f:(fun i perm ->
-            if i = Array.length state - 1 then (* last row is zero gate *)
+            if i = Array.length state - 1 then
+              (* last row is zero gate *)
               let prev =
                 Array.mapi perm ~f:(fun i x ->
                     wire sys x sys.next_row (index_to_col i))

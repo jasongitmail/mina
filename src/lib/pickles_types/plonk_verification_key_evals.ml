@@ -1,15 +1,15 @@
 open Core_kernel
 module H_list = Snarky_backendless.H_list
 
+let hash_fold_array f s x = hash_fold_list f s (Array.to_list x)
+
 [%%versioned
 module Stable = struct
   module V1 = struct
     type 'comm t = 'comm Kimchi.Protocol.VerifierIndex.verification_evals =
       { sigma_comm : 'comm array
-      ; qw_comm : 'comm array
-      ; qm_comm : 'comm
-      ; qc_comm : 'comm
-      ; rcm_comm : 'comm array array
+      ; coefficients_comm : 'comm array
+      ; generic_comm : 'comm
       ; psm_comm : 'comm
       ; add_comm : 'comm
       ; double_comm : 'comm
@@ -22,10 +22,8 @@ end]
 
 let map
     { sigma_comm
-    ; qw_comm
-    ; qm_comm
-    ; qc_comm
-    ; rcm_comm
+    ; coefficients_comm
+    ; generic_comm
     ; psm_comm
     ; add_comm
     ; double_comm
@@ -33,10 +31,8 @@ let map
     ; emul_comm
     } ~f =
   { sigma_comm = Array.map ~f sigma_comm
-  ; qw_comm = Array.map ~f qw_comm
-  ; qm_comm = f qm_comm
-  ; qc_comm = f qc_comm
-  ; rcm_comm = Array.map ~f:(fun x -> Array.map ~f x) rcm_comm
+  ; coefficients_comm = Array.map ~f coefficients_comm
+  ; generic_comm = f generic_comm
   ; psm_comm = f psm_comm
   ; add_comm = f add_comm
   ; double_comm = f double_comm
@@ -46,6 +42,7 @@ let map
 
 let map2 t1 t2 ~f = failwith "unimplemented"
 
+(* TODO: uncomment this *)
 (* { sigma_comm = f t1.sigma_comm t2.sigma_comm
    ; qw_comm = f t1.qw_comm t2.qw_comm
    ; qm_comm = f t1.qm_comm t2.qm_comm

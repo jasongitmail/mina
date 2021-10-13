@@ -17,7 +17,7 @@ pub type CamlGPallas = CamlGroupAffine<CamlFp>;
 #[derive(Clone, Copy, Debug, ocaml::IntoValue, ocaml::FromValue, OcamlEnum)]
 pub enum CamlGroupAffine<F> {
     Infinity,
-    Finite((F, F)),
+    Finite(((F, F))),
 }
 
 // Conversions from/to AffineVesta
