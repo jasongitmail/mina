@@ -3,8 +3,7 @@ open Core_kernel
 [%%versioned
 module Stable = struct
   module V1 = struct
-    type 'f t = 'f Marlin_plonk_bindings_types.Scalar_challenge.t =
-      | Scalar_challenge of 'f
+    type 'f t = 'f Kimchi.Protocol.scalar_challenge = Scalar_challenge of 'f
     [@@deriving sexp, compare, equal, yojson, hash]
   end
 end]

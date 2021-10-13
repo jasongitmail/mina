@@ -41,7 +41,7 @@ module type Input_intf = sig
 
   val print : t -> unit
 
-  val to_string : t -> bytes
+  val to_string : t -> string
 
   val of_string : bytes -> t
 

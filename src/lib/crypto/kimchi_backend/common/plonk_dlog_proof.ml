@@ -48,7 +48,7 @@ module type Inputs_intf = sig
     type t = Curve.Affine.t Poly_comm.t
 
     module Backend : sig
-      type t = Curve.Affine.Backend.t Marlin_plonk_bindings.Types.Poly_comm.t
+      type t = Curve.Affine.Backend.t Kimchi.Protocol.poly_comm
     end
 
     val of_backend_with_degree_bound : Backend.t -> t
@@ -60,14 +60,11 @@ module type Inputs_intf = sig
 
   module Opening_proof_backend : sig
     type t =
-      ( Scalar_field.t
-      , Curve.Affine.Backend.t )
-      Marlin_plonk_bindings.Types.Plonk_proof.Opening_proof.t
+      (Scalar_field.t, Curve.Affine.Backend.t) Kimchi.Protocol.opening_proof
   end
 
   module Evaluations_backend : sig
-    type t =
-      Scalar_field.t Marlin_plonk_bindings.Types.Plonk_proof.Evaluations.t
+    type t = Scalar_field.t Kimchi.Protocol.proof_evaluations
   end
 
   module Index : sig

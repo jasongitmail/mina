@@ -12,7 +12,7 @@ module type Inputs_intf = sig
       type t = Base_field.t * Base_field.t
 
       module Backend : sig
-        type t = (Base_field.t * Base_field.t) Or_infinity.t
+        type t = Base_field.t Or_infinity.t
 
         val zero : unit -> t
 
@@ -24,7 +24,7 @@ module type Inputs_intf = sig
   end
 
   module Backend : sig
-    type t = Curve.Affine.Backend.t Marlin_plonk_bindings.Types.Poly_comm.t
+    type t = Curve.Affine.Backend.t Kimchi.Protocol.poly_comm
 
     val make :
       Curve.Affine.Backend.t array -> Curve.Affine.Backend.t option -> t

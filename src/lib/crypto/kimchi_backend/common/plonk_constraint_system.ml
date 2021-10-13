@@ -1,6 +1,11 @@
-open Marlin_plonk_bindings.Types
+(* TODO: rmeove these openings *)
 open Sponge
 open Unsigned.Size_t
+
+module Constants = struct
+  (** number of witness *)
+  let columns = 15
+end
 
 (** a gate interface, parameterized by a field *)
 module type Gate_vector_intf = sig
@@ -12,9 +17,9 @@ module type Gate_vector_intf = sig
 
   val create : unit -> t
 
-  val add : t -> field Plonk_gate.t -> unit
+  val add : t -> field Kimchi.Protocol.circuit_gate -> unit
 
-  val get : t -> int -> field Plonk_gate.t
+  val get : t -> int -> field Kimchi.Protocol.circuit_gate
 end
 
 (** A row indexing in a constraint system *)
@@ -30,22 +35,28 @@ module Row = struct
         i + public_input_size
 end
 
-type 'row wired_to = { 
-  row : 'row;
-  col : int;
-}
+(** TKTK *)
+module Position = struct
+  (** A position is a row and a column *)
+  type 'row t = { row : 'row; col : int }
+
+  (** generates a full row of positions that each points to itself *)
+  let default (row: 'row) : (_ t) array = Array.init Constants.columns (fun i -> { row; col=i })
+end
 
 (** A specification for a gate type *)
 module Gate_spec = struct
   type ('row, 'f) t =
-    { kind : Kimchi.Protocol.gate_type
-          (* TODO: what do these fields represent? I think permutation? *)
-    ; wired_to : ('row wired_to) array
+    { kind : Kimchi.Protocol.gate_type ;
+    row : 'row 
+    ; wired_to : ('row Position.t) array
     ; coeffs : 'f array
     }
 
-  let map_rows t ~f =
-    { t with row = f t.row; lrow = f t.lrow; rrow = f t.rrow; orow = f t.orow }
+  let map_rows (t: (_, _) t) ~f : (_, _) t =
+    (* { wire with row = f row } *)
+    let wired_to = Array.map (fun (pos: _ Position.t) -> { pos with row = f pos.row }) t.wired_to in
+    { t with row = f t.row; wired_to }
 end
 
 (** Represents the state of a hash function at some point *)
@@ -135,11 +146,6 @@ module Plonk_constraint = struct
   include Snarky_backendless.Constraint.Add_kind (T)
 end
 
-(** A position is a row and a column *)
-module Position = struct
-  type t = { row : Row.t; col : int }
-end
-
 (* TODO: what is this? a counter? *)
 module Internal_var = Core_kernel.Unique_id.Int ()
 
@@ -173,7 +179,7 @@ end
 
 type ('a, 'f) t =
   { (** map of cells that share the same value (enforced by to the permutation) *)
-    equivalence_classes : Position.t list V.Table.t
+    equivalence_classes : (Row.t Position.t) list V.Table.t
   ; (** How to compute each internal variable (as a linear combination of other variables) *)
     internal_vars : (('f * V.t) list * 'f option) Internal_var.Table.t
   ; (** ?, in reversed order because functional programming *)
@@ -278,6 +284,7 @@ struct
             let t = H.feed_string t "ec_add" in
             let pr (x, y) = cvars [ x; y ] in
             t |> pr p1 |> pr p2 |> pr p3
+        | EC_double -> failwith "not_implemented"
         | EC_scale { state } ->
             let t = H.feed_string t "ec_scale" in
             Array.fold state ~init:t
@@ -416,26 +423,27 @@ struct
         failwith "Already finalized"
     | `Unfinalized_rev gates ->
         let g = Gates.create () in
-        let n = Set_once.get_exn sys.public_input_size [%here] in
+        let public_input_size = Set_once.get_exn sys.public_input_size [%here] in
         (* First, add gates for public input *)
-        let pub = [| Fp.one; Fp.zero; Fp.zero; Fp.zero; Fp.zero |] in
+        let pub_selectors = [| Fp.one; Fp.zero; Fp.zero; Fp.zero; Fp.zero |] in
         let pub_input_gate_specs_rev = ref [] in
-        for row = 0 to n - 1 do
+        for row = 0 to public_input_size - 1 do
           let lp = wire' sys (V.External (row + 1)) (Row.Public_input row) 0 in
-          let lp_row = Row.to_absolute ~public_input_size:n lp.row in
+          let lp_row = Row.to_absolute ~public_input_size lp.row in
           let public_gate =
-            let lp = { row = lp_row ; col = lp.col } in
-            Array.append [| lp |] (Array.init 14 ~f:(fun i -> { row; col=i + 1 }))
+            let lp = Position.{ row = lp_row ; col = lp.col } in
+            Array.append [| lp |] (Array.init 14 ~f:(fun i -> Position.{ row; col=i + 1 }))
           in
           (* Add to the gate vector *)
           pub_input_gate_specs_rev :=
-            { Gate_spec.kind = Generic
+            { Gate_spec.kind = Generic ;
+            row = lp_row
             ; wired_to = public_gate
-            ; coeffs = pub
+            ; coeffs = pub_selectors
             }
             :: !pub_input_gate_specs_rev
         done ;
-        let offset_row = Row.to_absolute ~public_input_size:n in
+        let offset_row = Row.to_absolute ~public_input_size in
         let all_gates =
           let rev_map_append xs tl ~f =
             List.fold xs ~init:tl ~f:(fun acc x -> f x :: acc)
@@ -444,16 +452,12 @@ struct
           let random_rows =
             let zeroes = Array.init 5 ~f:(fun _ -> Fp.zero) in
             List.init zk_rows ~f:(fun i ->
-                let row = Row.After_public_input (n + sys.next_row + i) in
+                let row = Row.After_public_input (public_input_size + sys.next_row + i) in
+                let wired_to = Position.default row in
                 offset
                   { kind = Generic
                   ; row
-                  ; lrow = row
-                  ; lcol = L
-                  ; rrow = row
-                  ; rcol = R
-                  ; orow = row
-                  ; ocol = O
+                  ; wired_to
                   ; coeffs = zeroes
                   })
           in
@@ -836,7 +840,8 @@ struct
           [| coeff l; coeff r; coeff o; m; !c |]
           sys
     (* | w0 | w1 | w2 | w3 | w4 | w5 
-         x    x     x   y    y    y
+state = [ x , x  , x ], [ y, y, y ], ... ]
+          i=0, perm^   i=1, perm^
     *)
     | Plonk_constraint.T (Poseidon { state }) ->
         let reduce_state sys (s : Fp.t Snarky_backendless.Cvar.t array array) :
@@ -846,6 +851,13 @@ struct
         let state = reduce_state sys state in
         let add_round_state array ind =
           let prev =
+            (* same row, except for last 3
+            also order is different except for first 3 -.-
+            0,1,2 -> 0,1,2 (mapped to what `wire` says)
+            3, 4, 5 -> ... (mapped to itself)
+            6, 7, 8 -> ... (mapped to itself)
+            9, 10, 11 -> ... (mapped to itself)
+            14, 15, 16 -> 3, 4, 5 (mapped to next row 0, 1, 2) *)
             Array.mapi array ~f:(fun i x ->
                 wire sys x sys.next_row i)
           in
